@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: grp-checkpoints, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: __STORAGE_CLASS__
+  resources: {requests: {storage: __CKPT_SIZE__}}

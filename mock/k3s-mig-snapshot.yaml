@@ -1,0 +1,10 @@
+snapshotVersion: k3s-mig-v1
+nodes:
+  - name: gpu-node-a
+    interconnect: MIG
+    gpus:
+      - {index: 0, memoryGb: 24, physical: rtxpro6000-mig0}
+      - {index: 1, memoryGb: 24, physical: rtxpro6000-mig1}
+      - {index: 2, memoryGb: 24, physical: rtxpro6000-mig2}
+      - {index: 3, memoryGb: 24, physical: rtxpro6000-mig3}
+workloads: []

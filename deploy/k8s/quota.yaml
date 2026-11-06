@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: grp-runtime-quota, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+spec:
+  hard:
+    pods: "__QUOTA_PODS__"
+    persistentvolumeclaims: "1"
+    count/resourceclaims.resource.k8s.io: "__QUOTA_GPUS__"
+    gpu.nvidia.com.deviceclass.resource.k8s.io/devices: "__QUOTA_GPUS__"
+    mig.nvidia.com.deviceclass.resource.k8s.io/devices: "__QUOTA_GPUS__"

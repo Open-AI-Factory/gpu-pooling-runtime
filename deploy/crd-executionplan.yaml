@@ -25,6 +25,7 @@ spec:
         - {name: Nodes, type: integer, jsonPath: .spec.placement.nodes}
         - {name: Validation, type: string, jsonPath: .status.validation}
         - {name: State, type: string, jsonPath: .status.state}
+        - {name: Binding, type: string, jsonPath: .status.binding.state}
         - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
       schema:
         openAPIV3Schema:
@@ -35,7 +36,7 @@ spec:
               required: [workloadRef, runtime, parallelism, placement]
               properties:
                 workloadRef: {type: string}
-                runtime: {type: string, enum: [ddp, fsdp, deepspeed, vllm]}
+                runtime: {type: string, enum: [ddp, fsdp, pytorch-3d, deepspeed, vllm]}
                 parallelism:
                   type: object
                   properties:
@@ -47,6 +48,10 @@ spec:
                   properties:
                     nodes: {type: integer, minimum: 1}
                     gpusPerNode: {type: integer, minimum: 1}
+                    perNode:
+                      type: object
+                      nullable: true
+                      additionalProperties: {type: integer, minimum: 1}
                 interconnect: {type: string}
                 profiling:
                   type: object

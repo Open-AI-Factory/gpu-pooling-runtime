@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 import yaml
+
+
+POOL_REF = "k8s:gpuresourcepools/"
+POOL_GROUP, POOL_VERSION, POOL_PLURAL = "gpu.platform.io", "v1alpha1", "gpuresourcepools"
+_RANK_POD = re.compile(r"-g\d+-r\d+(-gpu)?$")
+_MIG_START = re.compile(r"-(\d+)$")
+
+
+def is_pool_ref(path) -> bool:
+    return isinstance(path, str) and path.startswith(POOL_REF)
 
 
 @dataclass
@@ -14,6 +25,10 @@ class Gpu:
     memory_gb: float
     allocated_to: str | None = None
     physical: str = ""
+    uuid: str = ""
+    resource: str = ""
+    model: str = ""
+    mig_profile: str = ""
 
 
 @dataclass
@@ -58,10 +73,14 @@ class MockPoolClient:
             for g in n["gpus"]:
                 gid = f"{n['name']}:{g['index']}"
                 self.gpus[gid] = Gpu(gid, n["name"], float(g.get("memoryGb", 0)), g.get("allocatedTo"),
-                                     g.get("physical", gid))
+                                     g.get("physical", gid), model=g.get("model", ""),
+                                     mig_profile=g.get("migProfile", ""))
 
     def stale(self, at=None) -> bool:
         return False
+
+    def slot_uuids(self) -> dict[tuple, str]:
+        return {}
 
     def free_gpus(self) -> list[Gpu]:
         return [g for g in self.gpus.values() if g.allocated_to is None]
@@ -135,15 +154,18 @@ class GrpPoolStatusClient(MockPoolClient):
         self.valid_until = st.get("validUntil")
         self.observed_at = st.get("observedAt")
         self.phase = st.get("phase")
+        self.resources = list(st.get("resources") or [])
         self.interconnect, self.gpus, self.excluded = {}, {}, []
         counter: dict[str, int] = {}
-        for r in st.get("resources") or []:
+        kinds: dict[str, set] = {}
+        for r in self.resources:
             node = r.get("node", "")
             label = f"{node}/{r.get('resource', '')}"
+            holder = _holder(r)
             why = []
             if r.get("nodeFlags"):
                 why.append(f"nodeFlags={r['nodeFlags']}")
-            if not r.get("unassigned"):
+            if not r.get("unassigned") and not holder:
                 why.append("no unassigned unit")
             if why:
                 self.excluded.append({"device": label, "model": r.get("model"), "reason": ", ".join(why)})
@@ -151,9 +173,32 @@ class GrpPoolStatusClient(MockPoolClient):
             idx = counter.get(node, 0)
             counter[node] = idx + 1
             gid = f"{node}:{idx}"
-            self.interconnect[node] = "unknown"
-            self.gpus[gid] = Gpu(gid, node, _mi_to_gb(r.get("capacity")), None,
-                                 r.get("parentUuid") or r.get("uuid") or gid)
+            kinds.setdefault(node, set()).add(r.get("deviceType"))
+            mig = r.get("deviceType") == "mig"
+            physical = (r.get("uuid") if mig else r.get("parentUuid") or r.get("uuid")) or gid
+            self.gpus[gid] = Gpu(gid, node, _mi_to_gb(r.get("capacity")), holder, physical,
+                                 r.get("uuid") or "", r.get("resource") or "", r.get("model") or "",
+                                 (r.get("migProfile") or "") if mig else "")
+        for node, k in kinds.items():
+            self.interconnect[node] = "MIG" if k == {"mig"} else "unknown"
+
+    def slot_uuids(self) -> dict[tuple, str]:
+        parents: dict[str, set] = {}
+        for r in self.resources:
+            parents.setdefault(r.get("node", ""), set()).add(r.get("parentUuid") or r.get("uuid"))
+        index = {(n, p): f"GPU{i}" for n, ps in parents.items() for i, p in enumerate(sorted(ps, key=str))}
+        out = {}
+        for r in self.resources:
+            node, mig = r.get("node", ""), r.get("deviceType") == "mig"
+            start = r.get("placement")
+            if mig and start is None:
+                m = _MIG_START.search(r.get("resource") or "")
+                start = int(m.group(1)) if m else None
+            if not r.get("uuid") or (mig and start is None):
+                continue
+            gpu = index[(node, r.get("parentUuid") or r.get("uuid"))]
+            out[(node, gpu, r.get("migProfile") if mig else "full", start if mig else 0)] = r["uuid"]
+        return out
 
     def stale(self, at=None) -> bool:
         from datetime import datetime, timezone
@@ -161,6 +206,14 @@ class GrpPoolStatusClient(MockPoolClient):
             return False
         until = datetime.fromisoformat(self.valid_until.replace("Z", "+00:00"))
         return (at or datetime.now(timezone.utc)) > until
+
+
+def _holder(resource: dict) -> str | None:
+    owners = resource.get("owner") or []
+    if not owners or resource.get("unassigned"):
+        return None
+    keys = {_RANK_POD.sub("", o) for o in owners}
+    return keys.pop() if len(keys) == 1 else ",".join(sorted(keys))
 
 
 def _mi_to_gb(capacity: str | None) -> float:
@@ -173,7 +226,18 @@ def _mi_to_gb(capacity: str | None) -> float:
     return round(float(capacity) / 1024 ** 3, 2)
 
 
+def fetch_pool(name: str) -> dict:
+    from kubernetes import client, config
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+    return client.CustomObjectsApi().get_cluster_custom_object(POOL_GROUP, POOL_VERSION, POOL_PLURAL, name)
+
+
 def load_pool(path: str | Path) -> MockPoolClient:
+    if is_pool_ref(path):
+        return GrpPoolStatusClient(path, fetch_pool(path[len(POOL_REF):]))
     doc = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if isinstance(doc, dict) and doc.get("kind") == "GpuResourcePool":
         return GrpPoolStatusClient(path, doc)

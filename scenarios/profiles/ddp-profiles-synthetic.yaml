@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ddp-profiles
+data:
+  profiles.json: "{\n \"providerId\": \"scenario\",\n \"acceptedProfiles\": [\n  {\n\
+    \   \"id\": \"mig-dp4-m256\",\n   \"kind\": \"training\",\n   \"runtime\": {\n\
+    \    \"name\": \"pytorch\",\n    \"version\": \"2.11\"\n   },\n   \"model\": {\n\
+    \    \"id\": \"grp/train_ddp-mlp\"\n   },\n   \"precision\": \"float32\",\n  \
+    \ \"workload\": {\n    \"signature\": \"workloads/train_ddp.py\",\n    \"effectiveBatch\"\
+    : 1024\n   },\n   \"hardware\": {\n    \"model\": \"RTX PRO 6000 Blackwell Server\
+    \ Edition\",\n    \"mode\": \"mig\",\n    \"migProfile\": \"1g.24gb\",\n    \"\
+    deviceMemoryBytes\": 25367150592,\n    \"sharing\": \"exclusive\"\n   },\n   \"\
+    config\": {\n    \"batch\": {\n     \"microBatch\": 256,\n     \"gradientAccumulation\"\
+    : 1\n    },\n    \"parallelism\": {\n     \"dp\": 4,\n     \"tp\": 1,\n     \"\
+    pp\": 1\n    },\n    \"placement\": {\n     \"nodeCount\": 1,\n     \"gpusPerNode\"\
+    : 4,\n     \"interconnect\": \"none\"\n    },\n    \"memoryBudgetBytesPerDevice\"\
+    : 2147483648\n   },\n   \"metrics\": {\n    \"throughput\": 100.0,\n    \"latencyP95Ms\"\
+    : 0.0,\n    \"peakMemoryBytesPerDevice\": 1073741824,\n    \"qualityPassed\":\
+    \ true\n   },\n   \"sampleCount\": 1,\n   \"evidence\": {\n    \"kind\": \"synthetic\"\
+    ,\n    \"ref\": \"scenario-only\"\n   }\n  },\n  {\n   \"id\": \"mig-dp4-m128\"\
+    ,\n   \"kind\": \"training\",\n   \"runtime\": {\n    \"name\": \"pytorch\",\n\
+    \    \"version\": \"2.11\"\n   },\n   \"model\": {\n    \"id\": \"grp/train_ddp-mlp\"\
+    \n   },\n   \"precision\": \"float32\",\n   \"workload\": {\n    \"signature\"\
+    : \"workloads/train_ddp.py\",\n    \"effectiveBatch\": 1024\n   },\n   \"hardware\"\
+    : {\n    \"model\": \"RTX PRO 6000 Blackwell Server Edition\",\n    \"mode\":\
+    \ \"mig\",\n    \"migProfile\": \"1g.24gb\",\n    \"deviceMemoryBytes\": 25367150592,\n\
+    \    \"sharing\": \"exclusive\"\n   },\n   \"config\": {\n    \"batch\": {\n \
+    \    \"microBatch\": 128,\n     \"gradientAccumulation\": 2\n    },\n    \"parallelism\"\
+    : {\n     \"dp\": 4,\n     \"tp\": 1,\n     \"pp\": 1\n    },\n    \"placement\"\
+    : {\n     \"nodeCount\": 1,\n     \"gpusPerNode\": 4,\n     \"interconnect\":\
+    \ \"none\"\n    },\n    \"memoryBudgetBytesPerDevice\": 2147483648\n   },\n  \
+    \ \"metrics\": {\n    \"throughput\": 120.0,\n    \"latencyP95Ms\": 0.0,\n   \
+    \ \"peakMemoryBytesPerDevice\": 1073741824,\n    \"qualityPassed\": true\n   },\n\
+    \   \"sampleCount\": 1,\n   \"evidence\": {\n    \"kind\": \"synthetic\",\n  \
+    \  \"ref\": \"scenario-only\"\n   }\n  },\n  {\n   \"id\": \"mig-dp2-m256\",\n\
+    \   \"kind\": \"training\",\n   \"runtime\": {\n    \"name\": \"pytorch\",\n \
+    \   \"version\": \"2.11\"\n   },\n   \"model\": {\n    \"id\": \"grp/train_ddp-mlp\"\
+    \n   },\n   \"precision\": \"float32\",\n   \"workload\": {\n    \"signature\"\
+    : \"workloads/train_ddp.py\",\n    \"effectiveBatch\": 1024\n   },\n   \"hardware\"\
+    : {\n    \"model\": \"RTX PRO 6000 Blackwell Server Edition\",\n    \"mode\":\
+    \ \"mig\",\n    \"migProfile\": \"1g.24gb\",\n    \"deviceMemoryBytes\": 25367150592,\n\
+    \    \"sharing\": \"exclusive\"\n   },\n   \"config\": {\n    \"batch\": {\n \
+    \    \"microBatch\": 256,\n     \"gradientAccumulation\": 2\n    },\n    \"parallelism\"\
+    : {\n     \"dp\": 2,\n     \"tp\": 1,\n     \"pp\": 1\n    },\n    \"placement\"\
+    : {\n     \"nodeCount\": 1,\n     \"gpusPerNode\": 2,\n     \"interconnect\":\
+    \ \"none\"\n    },\n    \"memoryBudgetBytesPerDevice\": 2147483648\n   },\n  \
+    \ \"metrics\": {\n    \"throughput\": 60.0,\n    \"latencyP95Ms\": 0.0,\n    \"\
+    peakMemoryBytesPerDevice\": 1073741824,\n    \"qualityPassed\": true\n   },\n\
+    \   \"sampleCount\": 1,\n   \"evidence\": {\n    \"kind\": \"synthetic\",\n  \
+    \  \"ref\": \"scenario-only\"\n   }\n  },\n  {\n   \"id\": \"mig-dp2-m64\",\n\
+    \   \"kind\": \"training\",\n   \"runtime\": {\n    \"name\": \"pytorch\",\n \
+    \   \"version\": \"2.11\"\n   },\n   \"model\": {\n    \"id\": \"grp/train_ddp-mlp\"\
+    \n   },\n   \"precision\": \"float32\",\n   \"workload\": {\n    \"signature\"\
+    : \"workloads/train_ddp.py\",\n    \"effectiveBatch\": 1024\n   },\n   \"hardware\"\
+    : {\n    \"model\": \"RTX PRO 6000 Blackwell Server Edition\",\n    \"mode\":\
+    \ \"mig\",\n    \"migProfile\": \"1g.24gb\",\n    \"deviceMemoryBytes\": 25367150592,\n\
+    \    \"sharing\": \"exclusive\"\n   },\n   \"config\": {\n    \"batch\": {\n \
+    \    \"microBatch\": 64,\n     \"gradientAccumulation\": 8\n    },\n    \"parallelism\"\
+    : {\n     \"dp\": 2,\n     \"tp\": 1,\n     \"pp\": 1\n    },\n    \"placement\"\
+    : {\n     \"nodeCount\": 1,\n     \"gpusPerNode\": 2,\n     \"interconnect\":\
+    \ \"none\"\n    },\n    \"memoryBudgetBytesPerDevice\": 2147483648\n   },\n  \
+    \ \"metrics\": {\n    \"throughput\": 70.0,\n    \"latencyP95Ms\": 0.0,\n    \"\
+    peakMemoryBytesPerDevice\": 1073741824,\n    \"qualityPassed\": true\n   },\n\
+    \   \"sampleCount\": 1,\n   \"evidence\": {\n    \"kind\": \"synthetic\",\n  \
+    \  \"ref\": \"scenario-only\"\n   }\n  }\n ]\n}"

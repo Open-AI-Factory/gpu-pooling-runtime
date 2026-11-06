@@ -91,10 +91,27 @@ class RuntimeHook:
                           "threads": torch.get_num_threads()},
         })
 
+    def _load_everywhere(self) -> dict:
+        if not self.distributed:
+            return torch.load(self.resume, map_location="cpu")
+        t = torch.tensor([0 if Path(self.resume).is_file() else 1], dtype=torch.int32)
+        if dist.get_backend() == "nccl":
+            t = t.cuda()
+        dist.all_reduce(t, op=dist.ReduceOp.MAX)
+        if not int(t.item()):
+            return torch.load(self.resume, map_location="cpu", mmap=True)
+        obj = [torch.load(self.resume, map_location="cpu") if self.rank == 0 else None]
+        dist.broadcast_object_list(obj, src=0)
+        return obj[0]
+
     def restore(self, model, optimizer) -> int:
         if not self.resume:
             return 0
-        if not self.distributed or _strategy(model) == "single" and self.world == 1:
+        load_full = getattr(_unwrap(model), "load_full_checkpoint", None)
+        if load_full is not None:
+            ck = self._load_everywhere()
+            load_full(ck, optimizer)
+        elif not self.distributed or _strategy(model) == "single" and self.world == 1:
             ck = torch.load(self.resume, map_location="cpu")
             _unwrap(model).load_state_dict(ck["model"])
             optimizer.load_state_dict(ck["optimizer"])
@@ -148,7 +165,11 @@ class RuntimeHook:
     def _checkpoint(self, step, model, optimizer, metrics) -> None:
         path = self.ckpt_dir / f"ckpt-step{step}.pt"
         strategy = _strategy(model)
-        if self.distributed:
+        full = getattr(_unwrap(model), "full_checkpoint", None)
+        if full is not None:
+            msd, osd = full(optimizer) or (None, None)
+            strategy = "layout-free"
+        elif self.distributed:
             from torch.distributed.checkpoint.state_dict import StateDictOptions, get_state_dict
             msd, osd = get_state_dict(model, optimizer,
                                       options=StateDictOptions(full_state_dict=True, cpu_offload=True))

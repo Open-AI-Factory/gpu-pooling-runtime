@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: grp-operator, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime, app: grp-operator}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: grp-operator}}
+  template:
+    metadata: {labels: {app: grp-operator, app.kubernetes.io/part-of: grp-runtime}}
+    spec:
+      serviceAccountName: grp-operator
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: operator
+          image: __REGISTRY__grp-runtime-operator:__TAG__
+          imagePullPolicy: IfNotPresent
+          command: [kopf, run, --standalone, --namespace, __NAMESPACE__, -m,
+                    grp_runtime.runtime_coordination.runtime_action_controller.operator]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts:
+            - {name: checkpoints, mountPath: /work/runs/k8s, readOnly: true}
+      volumes:
+        - name: checkpoints
+          persistentVolumeClaim: {claimName: grp-checkpoints}

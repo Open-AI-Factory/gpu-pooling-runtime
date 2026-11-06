@@ -1,0 +1,28 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: PlanRequest
+metadata: {name: img-ddp4-plan}
+spec:
+  requestId: req-img-ddp4-0001
+  source: file
+  workloadRef: img-ddp4
+  runtime: ddp
+  parallelism: {dp: 4, tp: 1, pp: 1}
+  profiling: {workloadType: training, weightsGb: 0.0196, gradientsGb: 0.0196, optimizerGb: 0.0391, activationGbPerSample: 3.5e-05,
+    globalBatch: 1024}
+  poolSnapshot: k8s:gpuresourcepools/gpu-pool
+  allocation:
+    gpuIds: [MIG-00000000-0000-4000-8000-000000000001, MIG-00000000-0000-4000-8000-000000000002, MIG-00000000-0000-4000-8000-000000000003,
+      MIG-00000000-0000-4000-8000-000000000004]
+  launch:
+    script: workloads/train_ddp.py
+    settings: {effectiveBatch: 1024, maxMicroBatch: 256}
+    args: [--max-steps, '1000000', --step-sleep, '0.05']
+    cpu: '1'
+    memory: 4Gi
+    gpu: 1
+    runtimeClass: nvidia
+    image: grp-runtime-train:0.1.1
+    python: python
+    codeInImage: true
+    checkpoint: {claimName: grp-checkpoints}
+    env: {PYTHONUNBUFFERED: '1', NVIDIA_DRIVER_CAPABILITIES: 'compute,utility'}

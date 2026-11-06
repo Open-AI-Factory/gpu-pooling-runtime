@@ -20,6 +20,7 @@ spec:
         - {name: Phase, type: string, jsonPath: .status.phase}
         - {name: Result, type: string, jsonPath: .status.result}
         - {name: Plan, type: string, jsonPath: .spec.executionPlanRef}
+        - {name: Action, type: string, jsonPath: .spec.action}
         - {name: GPUs, type: integer, jsonPath: .spec.target.gpus}
         - {name: Adapter, type: string, jsonPath: .status.adapter}
         - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
@@ -38,14 +39,27 @@ spec:
                     kind: {type: string}
                     namespace: {type: string}
                     name: {type: string}
-                runtime: {type: string, enum: [pytorch, ddp, fsdp, deepspeed, vllm]}
-                action: {type: string, enum: [Resize, ScaleUp, ScaleDown, Reconfigure, Restart], default: Resize}
+                runtime: {type: string, enum: [pytorch, ddp, fsdp, pytorch-3d, deepspeed, vllm]}
+                action: {type: string, enum: [Resize, ScaleUp, ScaleDown, Reconfigure, Restart, ApplySettings, Observe], default: Resize}
                 mode: {type: string, enum: [restart], default: restart}
                 target:
                   type: object
                   properties:
                     gpus: {type: integer, minimum: 1}
                     gpuCount: {type: integer, minimum: 1}
+                    parallelism:
+                      type: object
+                      properties:
+                        dp: {type: integer, minimum: 1}
+                        tp: {type: integer, minimum: 1}
+                        pp: {type: integer, minimum: 1}
+                    allocation:
+                      type: object
+                      properties:
+                        gpuIds: {type: array, items: {type: string}}
+                    settings:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                 safePolicy:
                   type: object
                   properties:

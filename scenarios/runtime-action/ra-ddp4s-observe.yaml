@@ -1,0 +1,7 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: RuntimeAction
+metadata: {name: ra-ddp4s-observe}
+spec:
+  executionPlanRef: ddp4s-plan
+  action: Observe
+  target: {}

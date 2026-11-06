@@ -1,0 +1,40 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: PlanRequest
+metadata: {name: train3d-rs-plan}
+spec:
+  requestId: req-train3d-rs-0001
+  source: file
+  workloadRef: train3d-rs
+  runtime: pytorch-3d
+  parallelism: {dp: 1, tp: 2, pp: 2}
+  profiling:
+    workloadType: training
+    weightsGb: 0.1
+    gradientsGb: 0.1
+    optimizerGb: 0.2
+    activationGbPerSample: 0.0001
+    globalBatch: 1024
+  poolSnapshot: k8s:gpuresourcepools/gpu-pool
+  allocation:
+    gpuIds:
+      - MIG-00000000-0000-4000-8000-000000000001
+      - MIG-00000000-0000-4000-8000-000000000002
+      - MIG-00000000-0000-4000-8000-000000000003
+      - MIG-00000000-0000-4000-8000-000000000004
+  launch:
+    script: workloads/train_3d.py
+    args: [--max-steps, "1000000", --lr, "1e-4", --hidden, "1024", --layers, "8", --micro-batches, "4"]
+    cpu: "1500m"
+    memory: 4Gi
+    gpu: 1
+    runtimeClass: nvidia
+    image: pytorch-cuda:dev
+    python: /opt/venvs/grp-runtime/bin/python
+    hostRoot: /opt/grp-runtime
+    hostMounts:
+      - /opt/venvs/grp-runtime
+      - /opt/venvs/torch
+    env:
+      PYTHONPATH: /work/src
+      PYTHONUNBUFFERED: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility

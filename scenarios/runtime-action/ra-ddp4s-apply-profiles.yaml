@@ -1,0 +1,9 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: RuntimeAction
+metadata: {name: ra-ddp4s-apply-profiles}
+spec:
+  executionPlanRef: ddp4s-plan
+  action: ApplySettings
+  target:
+    settings: {profileConfigMap: train-ddp-profiles}
+  safePolicy: {mode: WaitSafePoint, timeoutSeconds: 120}

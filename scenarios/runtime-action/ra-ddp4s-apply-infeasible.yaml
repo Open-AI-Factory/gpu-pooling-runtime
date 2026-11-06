@@ -1,0 +1,9 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: RuntimeAction
+metadata: {name: ra-ddp4s-apply-infeasible}
+spec:
+  executionPlanRef: ddp4s-plan
+  action: ApplySettings
+  target:
+    settings: {profileConfigMap: train-ddp-profiles, maxMicroBatch: 32}
+  safePolicy: {mode: WaitSafePoint, timeoutSeconds: 120}

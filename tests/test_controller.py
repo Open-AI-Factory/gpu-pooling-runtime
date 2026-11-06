@@ -1,12 +1,13 @@
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
 from grp_runtime.cli import load
-from grp_runtime.controller import RuntimeActionController
+from grp_runtime.runtime_coordination.runtime_action_controller.controller import RuntimeActionController
 from grp_runtime.models import Profiling
-from grp_runtime.planner import build_plan, enumerate_configs
+from grp_runtime.execution_plan_controller.planner import build_plan, enumerate_configs
 from grp_runtime.pool import Candidate
 
 SCENARIOS = Path(__file__).resolve().parents[1] / "scenarios"
@@ -56,6 +57,30 @@ def test_scaledown_succeeds(tmp_path):
     assert st.released_gpus == ["node-a:2", "node-a:3"]
 
 
+def test_scaledown_follows_target_parallelism_and_allocation(tmp_path):
+    spec = load(str(EX / "ra-scaledown-mock.yaml"))
+    spec.adapter_options.update(safePointAfterSeconds=0.05)
+    spec.target_parallelism, spec.target_gpu_ids = {"dp": 1, "tp": 1, "pp": 2}, ["node-a:1", "node-a:3"]
+    st = RuntimeActionController(tmp_path, poll_interval=0.02).run(spec)
+    assert st.phase.value == "Succeeded", st.message
+    assert (st.after["dp"], st.after["tp"], st.after["pp"]) == (1, 1, 2)
+    assert st.after["gpuIds"] == ["node-a:1", "node-a:3"]
+    assert st.execution_plan["allocation"]["source"] == "request"
+    assert st.execution_plan["parallelismSource"] == "target"
+    assert run("ra-scaledown-mock.yaml", tmp_path, safePointAfterSeconds=0.05).execution_plan["allocation"]["source"]         == "planner-fallback"
+
+
+def test_target_allocation_must_be_free_and_match_target(tmp_path):
+    spec = load(str(EX / "ra-scaledown-mock.yaml"))
+    spec.target_gpu_ids = ["node-a:1"]
+    assert RuntimeActionController(tmp_path).run(spec).reason == "InvalidSpec"
+    spec.target_gpu_ids, spec.target_parallelism = ["node-a:1", "node-a:3"], {"dp": 4, "tp": 1, "pp": 1}
+    assert RuntimeActionController(tmp_path).run(spec).reason == "InvalidSpec"
+    spec.target_parallelism, spec.target_gpu_ids = None, ["node-a:1", "nope:0"]
+    st = RuntimeActionController(tmp_path).run(spec)
+    assert st.reason == "InsufficientResources" and "nope:0" in st.message
+
+
 def test_scaleup_adds_same_node_gpus(tmp_path):
     st = run("ra-scaleup-mock.yaml", tmp_path, safePointAfterSeconds=0.05)
     assert st.phase.value == "Succeeded"
@@ -103,4 +128,7 @@ def test_scenarios_are_valid_yaml():
     for p in files:
         m = yaml.safe_load(p.read_text(encoding="utf-8"))
         assert m["kind"] in ("RuntimeAction", "ExecutionPlan", "InferenceService", "RecoveryRequest",
-                             "PlanRequest"), p
+                             "PlanRequest", "ConfigMap"), p
+        if m["kind"] == "ConfigMap":
+            from grp_runtime.execution_plan_controller.profiles import validate_profiles
+            assert validate_profiles(json.loads(m["data"]["profiles.json"])["acceptedProfiles"]), p

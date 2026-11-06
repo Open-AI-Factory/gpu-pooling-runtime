@@ -1,0 +1,14 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: RuntimeAction
+metadata: {name: ra-3d-tp2pp2-to-pp2}
+spec:
+  executionPlanRef: train3d-rs-plan
+  action: ScaleDown
+  target:
+    gpus: 2
+    parallelism: {dp: 1, tp: 1, pp: 2}
+    allocation:
+      gpuIds:
+        - MIG-00000000-0000-4000-8000-000000000003
+        - MIG-00000000-0000-4000-8000-000000000004
+  safePolicy: {mode: WaitSafePoint, timeoutSeconds: 120}

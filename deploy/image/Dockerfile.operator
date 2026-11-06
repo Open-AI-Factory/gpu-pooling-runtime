@@ -1,0 +1,13 @@
+ARG BASE=python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+FROM ${BASE}
+COPY deploy/image/requirements-operator.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+WORKDIR /work
+COPY src /work/src
+COPY workloads /work/workloads
+COPY mock /work/mock
+COPY deploy/pool /work/deploy/pool
+RUN useradd --uid 10001 --no-create-home grp && mkdir -p /work/runs/k8s && chown -R 10001:10001 /work/runs
+ENV PYTHONPATH=/work/src PYTHONUNBUFFERED=1
+USER 10001
+CMD ["kopf", "run", "--standalone", "--all-namespaces", "-m", "grp_runtime.runtime_coordination.runtime_action_controller.operator"]

@@ -1,0 +1,12 @@
+[Unit]
+Description=Recreate MIG instances before k3s starts
+After=systemd-modules-load.service
+Before=k3s.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/grp-mig-setup.sh
+
+[Install]
+WantedBy=multi-user.target

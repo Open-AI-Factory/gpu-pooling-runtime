@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: grp-operator, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: grp-operator, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [grp.keti.re.kr]
+    resources: [planrequests, executionplans, runtimeactions]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [grp.keti.re.kr]
+    resources: [planrequests/status, executionplans/status, runtimeactions/status]
+    verbs: [get, update, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, patch, delete]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, create, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get, list, watch, create, delete, deletecollection]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: grp-operator, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-operator, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: grp-operator}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: grp-operator-read-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [gpu.platform.io]
+    resources: [gpuresourcepools]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: grp-operator-read-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-operator, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: grp-operator-read-__NAMESPACE__}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: grp-agent, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: grp-agent, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: grp-agent, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-agent, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: grp-agent}

@@ -1,7 +1,7 @@
 import pytest
 
 from grp_runtime.models import Profiling
-from grp_runtime.planner import build_plan, evaluate
+from grp_runtime.execution_plan_controller.planner import build_plan, evaluate
 from grp_runtime.pool import Candidate
 
 

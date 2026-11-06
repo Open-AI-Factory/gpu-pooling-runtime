@@ -3,6 +3,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH=/root/venvs/grp/bin:$PATH
 ROOTDIR=runs/capture
+REQ=${PLAN_REQUEST:-scenarios/plan-request/pr-train-kind.yaml}
 DIR=${CAPTURE_DIR:-$(ls -d $ROOTDIR/*/ 2>/dev/null | sort | tail -1)}
 DIR=${DIR%/}
 
@@ -26,9 +27,9 @@ step() {
   local s=$1; [ -n "$DIR" ] || { echo "run 'prep' first"; exit 1; }
   case $s in
   A)  note "캡처 A: 외부 실행 요청 (PlanRequest)"
-      run "grep -v '^#' scenarios/plan-request/pr-train-kind.yaml"
-      run "grep -nE '^ +(parallelism|allocation):|gpusPerNode:' scenarios/plan-request/pr-train-kind.yaml || echo '(parallelism·gpusPerNode·allocation 없음: GPU 수만 고정 입력, 워커 구성·DP×TP×PP·노드는 지정하지 않음)'"
-      run "kubectl apply -f scenarios/plan-request/pr-train-kind.yaml"
+      run "grep -v '^#' $REQ"
+      run "grep -nE '^ +(parallelism|allocation):|gpusPerNode:' $REQ || echo '(parallelism·gpusPerNode·allocation 없음: GPU 수만 고정 입력, 워커 구성·DP×TP×PP·노드는 지정하지 않음)'"
+      run "kubectl apply -f $REQ"
       wait_pr
       run "kubectl get planrequest train-plan" ;;
   B)  note "캡처 B: 실행 요구사항 분석·병렬화 후보 (자원 풀 토폴로지 요약 기준, 특정 GPU·노드는 고르지 않음, 규칙 기반 선정)"

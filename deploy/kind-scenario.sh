@@ -11,7 +11,7 @@ kubectl apply -f deploy/crd-runtimeaction.yaml >/dev/null
 kubectl create ns $NS --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 pkill -f "^$VENV/bin/python3? $VENV/bin/kopf" ; sleep 1
-nohup $VENV/bin/kopf run -m grp_runtime.operator --all-namespaces > /root/operator.log 2>&1 &
+nohup $VENV/bin/kopf run -m grp_runtime.runtime_coordination.runtime_action_controller.operator --all-namespaces > /root/operator.log 2>&1 &
 sleep 5
 
 kubectl delete ra --all -n $NS --ignore-not-found >/dev/null

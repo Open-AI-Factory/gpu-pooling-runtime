@@ -18,7 +18,7 @@ spec:
         status: {}
       additionalPrinterColumns:
         - {name: Workload, type: string, jsonPath: .spec.workloadRef}
-        - {name: GPUs, type: integer, jsonPath: .spec.resources.gpus}
+        - {name: GPUs, type: integer, jsonPath: .status.gpuCount.value}
         - {name: Workers, type: string, jsonPath: .status.workers.nodes, description: "node slots"}
         - {name: DP, type: integer, jsonPath: .status.selected.dp}
         - {name: TP, type: integer, jsonPath: .status.selected.tp}
@@ -27,6 +27,9 @@ spec:
         - {name: Reason, type: string, jsonPath: .status.reason}
         - {name: Plan, type: string, jsonPath: .status.executionPlan}
         - {name: Placement, type: string, jsonPath: .status.placement.state}
+        - {name: Binding, type: string, jsonPath: .status.binding.state}
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: Loss, type: number, jsonPath: .status.outcome.loss, priority: 1}
         - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
       schema:
         openAPIV3Schema:

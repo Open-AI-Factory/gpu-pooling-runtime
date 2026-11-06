@@ -25,8 +25,9 @@ class Previous(str, Enum):
     LOST = "Lost"
 
 
-ACTIONS = ("Resize", "ScaleUp", "ScaleDown", "Reconfigure", "Restart")
-RUNTIMES = ("pytorch", "ddp", "fsdp", "deepspeed", "vllm")
+ACTIONS = ("Resize", "ScaleUp", "ScaleDown", "Reconfigure", "Restart", "ApplySettings", "Observe")
+KEEP_LAYOUT_ACTIONS = ("ApplySettings", "Observe")
+RUNTIMES = ("pytorch", "ddp", "fsdp", "pytorch-3d", "deepspeed", "vllm")
 
 
 def now() -> str:
@@ -107,6 +108,9 @@ class RuntimeActionSpec:
     mode: str = "restart"
     execution_plan_ref: str | None = None
     namespace: str = "default"
+    target_parallelism: dict[str, int] | None = None
+    target_gpu_ids: list[str] | None = None
+    target_settings: dict[str, Any] | None = None
 
     @classmethod
     def from_manifest(cls, m: dict[str, Any]) -> "RuntimeActionSpec":
@@ -118,6 +122,7 @@ class RuntimeActionSpec:
             wr = {"name": wr, "namespace": ns}
         sp = s.get("safePolicy", {})
         pf = s.get("profiling", {})
+        tg = s.get("target", {}) or {}
         return cls(
             name=md.get("name", "runtimeaction"),
             workload_ref=WorkloadRef(
@@ -140,6 +145,9 @@ class RuntimeActionSpec:
             adapter_mode=s.get("adapterMode", "mock"),
             adapter_options=s.get("adapterOptions", {}) or {},
             pool_snapshot=s.get("poolSnapshot"),
+            target_parallelism=tg.get("parallelism"),
+            target_gpu_ids=(tg.get("allocation") or {}).get("gpuIds"),
+            target_settings=tg.get("settings"),
         )
 
 
@@ -211,6 +219,7 @@ class RuntimeActionStatus:
     previous: str | None = None
     message: str = ""
     conditions: list[dict[str, Any]] = field(default_factory=list)
+    observation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -223,4 +232,5 @@ class RuntimeActionStatus:
             "releasedGpus": d["released_gpus"],
             "message": d["message"],
             "conditions": d["conditions"],
+            **({"observation": d["observation"]} if self.observation is not None else {}),
         }

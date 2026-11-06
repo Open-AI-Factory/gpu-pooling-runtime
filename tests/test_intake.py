@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from grp_runtime import intake
-from grp_runtime.k8s.execution_plan import validate
+from grp_runtime.execution_plan_controller import intake
+from grp_runtime.execution_plan_controller.execution_plan import validate
 from grp_runtime.pool import MockPoolClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,10 +79,54 @@ def test_manifest_keeps_existing_spec_fields():
         assert gen["spec"][k] == hand["spec"][k], k
 
 
-def test_given_parallelism_is_validated_not_redecided():
+def test_given_parallelism_is_kept_and_placed():
     res = intake.generate(req("pr-train-fixed.yaml"))
-    assert res.result == "Generated" and res.decision["mode"] == "Validated"
-    assert len(res.decision["candidates"]) == 1 and res.decision["selected"] == {"dp": 2, "tp": 1, "pp": 1}
+    assert res.result == "Generated" and res.decision["mode"] == "Given"
+    assert res.decision["selected"] == {"dp": 2, "tp": 1, "pp": 1}
+    assert res.decision["execution"]["executable"] is True and "launch" in res.manifest["spec"]
+    assert [x["gpu"] for x in res.decision["rankMap"]] == ["grp-worker:0", "grp-worker2:0"]
+    out = validate(res.manifest, MockPoolClient(ROOT / "mock" / "kind-snapshot.yaml"))
+    assert out["placement"]["state"] == "Placed"
+    assert out["placement"]["rankNodes"] == ["grp-worker", "grp-worker2"]
+
+
+def test_given_3d_parallelism_placement_candidates():
+    res = intake.generate(req("pr-given-3d.yaml"))
+    d = res.decision
+    assert res.result == "Generated" and d["selected"] == {"dp": 2, "tp": 2, "pp": 2}
+    assert d["gpuCount"] == {"value": 8, "source": "parallelism", "analyzed": False}
+    cands = d["placementCandidates"]
+    assert len(cands) >= 2 and cands[0]["selected"] and not any(c["selected"] for c in cands[1:])
+    best = cands[0]
+    assert best["tpGroups"] == "intra-node" and best["ppStages"] == "one stage per node"
+    assert best["layout"]["gpu-node-a"] == ["D1P1T1", "D1P1T2", "D2P1T1", "D2P1T2"]
+    split = next(c for c in cands if c["tpGroups"] == "cross-node")
+    assert split["ppStages"] == "mixed per node" and split["tpCrossNode"] > 0
+    nodes = {x["rank"]: x["node"] for x in d["rankMap"]}
+    for dp_ in range(2):
+        for pp_ in range(2):
+            group = [x for x in d["rankMap"] if x["dp"] == dp_ and x["pp"] == pp_]
+            assert len({x["node"] for x in group}) == 1
+    assert len(set(nodes.values())) == 2
+
+
+def test_given_3d_parallelism_is_plan_only_on_k8s_adapter():
+    res = intake.generate(req("pr-given-3d.yaml"))
+    assert res.decision["execution"]["executable"] is False
+    spec = res.manifest["spec"]
+    assert spec["planning"]["planOnly"] is True and "launch" not in spec
+    assert spec["planning"]["pinnedNodes"] == ["gpu-node-a", "gpu-node-b"] and len(spec["planning"]["rankMap"]) == 8
+    out = validate(res.manifest, MockPoolClient(ROOT / "mock" / "two-node-nvlink-snapshot.yaml"))
+    assert out["validation"] == "Accepted" and "plan only" in out["reason"]
+    assert out["placement"]["state"] == "Placed"
+    assert out["placement"]["rankNodes"] == [x["node"] for x in spec["planning"]["rankMap"]]
+
+
+def test_given_parallelism_without_enough_gpus():
+    doc = req("pr-given-3d.yaml")
+    doc["spec"]["parallelism"] = {"dp": 4, "tp": 2, "pp": 2}
+    res = intake.generate(doc)
+    assert res.reason == "InsufficientResources" and "16 GPU(s)" in res.message
 
 
 def test_invalid_request_lists_field_errors():
@@ -111,9 +155,10 @@ def test_invalid_fields(mutate, code):
     assert res.reason == "InvalidSpec" and code in {e["code"] for e in res.errors}
 
 
-def test_tp_not_supported_by_adapter():
+def test_tp_not_supported_by_adapter_is_plan_only():
     res = intake.generate(req("pr-tp-unsupported.yaml"))
-    assert res.reason == "AdapterRejected" and "TP>1" in res.message
+    assert res.result == "Generated" and res.decision["execution"]["executable"] is False
+    assert "TP>1" in res.decision["execution"]["reason"]
 
 
 def test_runtime_not_supported_by_k8s_adapter():
@@ -139,7 +184,7 @@ def test_given_parallelism_infeasible_memory():
     doc = req("pr-train-fixed.yaml")
     doc["spec"]["profiling"]["weightsGb"] = 10
     res = intake.generate(doc)
-    assert res.reason == "NoFeasiblePlan" and res.decision["mode"] == "Validated"
+    assert res.reason == "NoFeasiblePlan" and res.decision["mode"] == "Given"
 
 
 def test_pool_version_mismatch():
@@ -345,3 +390,45 @@ def test_register_detects_pool_change_after_decision(tmp_path):
     k = FakeKubectl()
     out = intake.register(res, root=tmp_path, runner=k)
     assert out.reason == "PoolSnapshotMismatch" and all(c[0][1] != "create" for c in k.calls)
+
+
+def test_plan_owned_by_request_resource():
+    ref = {"kind": "PlanRequest", "name": "train-plan", "namespace": "default", "uid": "u-1"}
+    md = intake.generate(req("pr-train-kind.yaml"), request_ref=ref).manifest["metadata"]
+    assert md["ownerReferences"] == [{"apiVersion": "grp.keti.re.kr/v1alpha1", "kind": "PlanRequest",
+                                      "name": "train-plan", "uid": "u-1"}]
+    assert "ownerReferences" not in intake.generate(req("pr-train-kind.yaml")).manifest["metadata"]
+
+
+def test_live_pool_reference_is_accepted_and_unavailable_pool_is_rejected(monkeypatch):
+    doc = req("pr-train-kind.yaml")
+    doc["spec"]["poolSnapshot"] = "k8s:gpuresourcepools/gpu-pool"
+    assert intake.parse_request(doc)[1] == []
+
+    def boom(name):
+        raise RuntimeError("not found")
+    monkeypatch.setattr("grp_runtime.pool.fetch_pool", boom)
+    res = intake.generate(doc)
+    assert (res.result, res.reason) == ("Rejected", "PoolUnavailable")
+
+
+def test_given_plan_carries_process_groups_and_communication():
+    res = intake.generate(req("pr-given-3d.yaml"))
+    d = res.decision
+    coord = {x["rank"]: x for x in d["rankMap"]}
+    groups = d["processGroups"]
+    for kind, fixed in (("tp", ("dp", "pp")), ("dp", ("tp", "pp")), ("pp", ("dp", "tp"))):
+        assert sorted(r for g in groups[kind] for r in g) == list(range(8))
+        for g in groups[kind]:
+            assert len({tuple(coord[r][k] for k in fixed) for r in g}) == 1
+    assert all(len({coord[r]["node"] for r in g}) == 1 for g in groups["tp"])
+    assert d["communication"]["backend"] == "nccl"
+    planning = res.manifest["spec"]["planning"]
+    assert planning["processGroups"] == groups and planning["communication"]["port"] == 29500
+
+
+def test_allocation_source_marks_planner_fallback():
+    fixed = intake.generate(req("pr-train-fixed.yaml")).decision
+    assert fixed["allocation"]["source"] == "planner-fallback"
+    assert fixed["communication"]["backend"] == "gloo"
+    assert intake.generate(req("pr-train-allocated.yaml")).decision["allocation"]["source"] == "request"

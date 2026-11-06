@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 from kubernetes import client, config, watch
 
-from .k8s.workload import Workload
+from .runtime_adapter.workload import Workload
 
 GROUP, VERSION = "grp.keti.re.kr", "v1alpha1"
 DONE_RESULTS = ("request validated", "preparation=Ready", "serviceConfig=Valid", "restart=Running",
@@ -104,7 +104,7 @@ def _print_candidates(res) -> None:
 
 
 def _finish(res, a) -> int:
-    from . import intake
+    from .execution_plan_controller import intake
     if res.result == "Generated" and a.apply:
         res = intake.register(res, allow_stale_pool=getattr(a, "allow_stale_pool", False))
         print(f"[register]   {res.result}" + (f" reason={res.reason}" if res.reason else "") + f"  {res.message}")
@@ -136,24 +136,40 @@ def _print_decision(res) -> None:
             print(f"             excluded {x['device']} ({x['model']}): {x['reason']}")
     if d.get("topology"):
         t = d["topology"]
-        print(f"[topology]   usable GPUs per node={t['usableGpusPerNode']} memory={t['memoryGb']}GB/GPU "
-              f"interconnect={t['interconnect']} (summary only, no GPU selected)")
-    if d.get("constraint"):
+        print(f"[topology]   usable GPUs per node={t['usableGpusPerNode']} memory={t.get('memoryGb', '-')}GB/GPU "
+              f"interconnect={t.get('interconnect')}")
+    if d.get("mode") == "Given":
+        s = d.get("selected") or {}
+        print(f"[request]    parallelism given: DP{s.get('dp')} TP{s.get('tp')} PP{s.get('pp')} "
+              f"-> {d['gpuCount']['value']} GPU(s)")
+        for c in d.get("placementCandidates") or []:
+            print(f"[placement]  {c['label']}{' *' if c['selected'] else '  '} TP {c['tpGroups']}, PP {c['ppStages']}, "
+                  f"cross-node TP/DP/PP {c['tpCrossNode']}/{c['dpCrossNode']}/{c['ppCrossNode']}, "
+                  f"nodes {c['nodesUsed']}, fragmented {c['fragmentedNodes']}")
+            for n, cells in c["layout"].items():
+                print(f"               {n}: {' '.join(cells)}")
+    elif d.get("constraint"):
         print(f"[constraint] pinned GPUs={d['constraint']['gpuIds']} (placement must use these)")
-    if d.get("workers"):
+    if d.get("workers") and d.get("mode") != "Given":
         w = d["workers"]
         print(f"[workers]    GPUs={w['gpus']} (request, fixed) -> {w['nodes']} node slot(s) x {w['gpusPerNode']} GPU "
               f"(gpusPerNode from {w['gpusPerNodeSource']})")
     if d.get("candidates"):
         print(f"[decide]     mode={d.get('mode')} candidates={len(d['candidates'])}")
         _print_candidates(res)
-    if d.get("selected"):
+    if d.get("selected") and res.manifest:
         s = d["selected"]
         print(f"[generate]   ExecutionPlan {res.manifest['metadata']['name']}  DP{s['dp']} TP{s['tp']} PP{s['pp']}  "
               f"({d['reason']})")
-        w = d["workers"]
-        print(f"[to sched]   world={w['world']} rank->node slot {[x['nodeSlot'] for x in w['rankSlots']]} "
-              f"constraints={w['constraints']}  (node names are decided by the scheduler)")
+        if d.get("rankMap"):
+            for x in d["rankMap"]:
+                print(f"               rank{x['rank']} DP{x['dp'] + 1} PP{x['pp'] + 1} TP{x['tp'] + 1} -> {x['gpu']}")
+            ex = d.get("execution") or {}
+            print(f"[execution]  executable={str(ex.get('executable')).lower()} ({ex.get('reason')})")
+        else:
+            w = d["workers"]
+            print(f"[to sched]   world={w['world']} rank->node slot {[x['nodeSlot'] for x in w['rankSlots']]} "
+                  f"constraints={w['constraints']}  (node names are decided by the scheduler)")
     for o in (d.get("feedback") or {}).get("options") or []:
         print(f"[feedback]   DP{o['dp']} TP{o['tp']} PP{o['pp']} needs >= {o['minGpusPerNode']} GPU/node, "
               f">= {o['minGpuMemoryGb']}GB per GPU")
@@ -162,7 +178,7 @@ def _print_decision(res) -> None:
 
 
 def cmd_plan(a) -> int:
-    from . import intake
+    from .execution_plan_controller import intake
     prof_doc = yaml.safe_load(open(a.profiling, encoding="utf-8")) if a.profiling else {}
     doc = {"kind": "PlanRequest", "metadata": {"name": a.name, "namespace": a.namespace},
            "spec": {"requestId": a.name, "source": "keticti-cli", "workloadRef": a.workload, "runtime": a.runtime,
@@ -177,7 +193,7 @@ def cmd_plan(a) -> int:
 
 
 def cmd_plan_request(a) -> int:
-    from . import intake
+    from .execution_plan_controller import intake
     doc = intake.load_request(a.request)
     s = doc.get("spec") if isinstance(doc, dict) else None
     s = s if isinstance(s, dict) else {}

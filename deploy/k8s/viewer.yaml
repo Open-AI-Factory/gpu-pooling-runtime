@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: grp-viewer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: grp-viewer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [grp.keti.re.kr]
+    resources: [planrequests, executionplans, runtimeactions]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: grp-viewer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-viewer, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: grp-viewer}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: grp-viewer-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [gpu.platform.io]
+    resources: [gpuresourcepools]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: grp-viewer-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-viewer, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: grp-viewer-__NAMESPACE__}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: grp-viewer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime, app: grp-viewer}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: grp-viewer}}
+  template:
+    metadata: {labels: {app: grp-viewer, app.kubernetes.io/part-of: grp-runtime}}
+    spec:
+      serviceAccountName: grp-viewer
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: viewer
+          image: __REGISTRY__grp-runtime-operator:__TAG__
+          imagePullPolicy: IfNotPresent
+          command: [python, -m, grp_runtime.viewer, --namespace, __NAMESPACE__, --pool, gpu-pool, --port, "8080"]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: grp-viewer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+spec:
+  type: ClusterIP
+  selector: {app: grp-viewer}
+  ports: [{name: http, port: 80, targetPort: http}]

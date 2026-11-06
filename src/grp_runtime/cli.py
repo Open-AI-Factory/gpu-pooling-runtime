@@ -8,9 +8,9 @@ from pathlib import Path
 
 import yaml
 
-from .controller import RuntimeActionController
+from .runtime_coordination.runtime_action_controller.controller import RuntimeActionController
 from .models import RuntimeActionSpec
-from .planner import build_plan
+from .execution_plan_controller.planner import build_plan
 from .pool import MockPoolClient
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -64,7 +64,7 @@ def cmd_plan(a) -> int:
         plan = build_plan(spec.target_gpu_count, spec.profiling, c, "-")
         rows = plan.candidates if plan else []
         if not plan:
-            from .planner import enumerate_configs, evaluate
+            from .execution_plan_controller.planner import enumerate_configs, evaluate
             for dp, tp, pp in enumerate_configs(spec.target_gpu_count):
                 ok, why, mem = evaluate(dp, tp, pp, spec.profiling, c)
                 rows.append({"dp": dp, "tp": tp, "pp": pp, "feasible": ok, "note": why})

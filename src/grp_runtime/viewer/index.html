@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRP 런타임 엔진</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --line: #dfe3e8; --text: #1d232b; --muted: #687384;
+  --accent: #2f6fde; --accent-soft: #e3ecfc; --ok: #1f8a4c; --ok-soft: #e1f3e8;
+  --warn: #b26a00; --warn-soft: #fbefd9; --bad: #c33b3b; --bad-soft: #fbe3e3;
+  --other: #cfd5dd; --free: transparent;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #181c22; --line: #2a3039; --text: #e3e7ec; --muted: #8b95a3;
+    --accent: #5b93f0; --accent-soft: #1d2b44; --ok: #4cc27f; --ok-soft: #173325;
+    --warn: #e0a33e; --warn-soft: #3a2c13; --bad: #ec6b6b; --bad-soft: #3d1c1c; --other: #3a414c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #181c22; --line: #2a3039; --text: #e3e7ec; --muted: #8b95a3;
+  --accent: #5b93f0; --accent-soft: #1d2b44; --ok: #4cc27f; --ok-soft: #173325;
+  --warn: #e0a33e; --warn-soft: #3a2c13; --bad: #ec6b6b; --bad-soft: #3d1c1c; --other: #3a414c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 14px 20px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 17px; margin: 0; }
+header .meta { color: var(--muted); font-size: 13px; }
+main { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; padding: 16px 20px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.panel + .panel { margin-top: 14px; }
+h2 { font-size: 14px; margin: 0 0 10px; }
+h2 small { font-weight: normal; color: var(--muted); margin-left: 6px; }
+.list button { display: block; width: 100%; text-align: left; background: none; color: inherit; font: inherit;
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+.list button[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.list .n { font-weight: 600; word-break: break-all; }
+.list .s { color: var(--muted); font-size: 12px; }
+.badge { display: inline-block; padding: 0 7px; border-radius: 10px; font-size: 12px; line-height: 20px;
+  background: var(--other); color: var(--text); white-space: nowrap; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.run { background: var(--accent-soft); color: var(--accent); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.bad { background: var(--bad-soft); color: var(--bad); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.stat { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.stat .k { color: var(--muted); font-size: 12px; }
+.stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat .d { color: var(--muted); font-size: 12px; }
+.flow { display: flex; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+.gen { flex: 0 0 auto; min-width: 190px; max-width: 260px; border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; }
+.gen.cur { border-color: var(--accent); }
+.gen .t { color: var(--muted); font-size: 12px; }
+.gen .h { font-weight: 600; }
+.arrow { flex: 0 0 auto; align-self: center; padding: 0 8px; color: var(--muted); font-size: 12px; text-align: center;
+  max-width: 150px; }
+.pipe { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.ph { border-radius: 4px; padding: 2px 8px; font-size: 12px; background: var(--other); }
+.ph.done { background: var(--ok-soft); color: var(--ok); }
+.ph.now { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ph.fail { background: var(--bad-soft); color: var(--bad); }
+.ph small { opacity: .8; margin-left: 4px; }
+.action { border-top: 1px solid var(--line); padding: 10px 0; }
+.action:first-of-type { border-top: 0; padding-top: 0; }
+.action .top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; word-break: break-word; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+td, th { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: normal; }
+.nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.node { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.node .h { font-weight: 600; margin-bottom: 6px; word-break: break-all; }
+.phys { border: 1px dashed var(--line); border-radius: 5px; padding: 6px; margin-bottom: 6px; }
+.phys .m { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.slots { display: flex; gap: 4px; flex-wrap: wrap; }
+.slot { flex: 1 1 60px; min-width: 60px; border-radius: 4px; padding: 4px 6px; font-size: 12px;
+  border: 1px solid var(--line); background: var(--free); }
+.slot.mine { background: var(--accent); color: #fff; border-color: var(--accent); }
+.slot.other { background: var(--other); }
+.slot .r { font-weight: 600; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px;
+  vertical-align: -1px; border: 1px solid var(--line); }
+svg text { fill: var(--muted); font-size: 11px; }
+.empty { color: var(--muted); }
+.err { background: var(--bad-soft); color: var(--bad); padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GRP 런타임 엔진</h1>
+  <span class="meta" id="meta">불러오는 중…</span>
+</header>
+<main>
+  <aside>
+    <div class="panel">
+      <h2>작업</h2>
+      <div class="list" id="list"></div>
+      <div id="pending"></div>
+    </div>
+  </aside>
+  <section id="detail"></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const ts = (s) => (s ? Date.parse(s) / 1000 : null);
+const clock = (t) => (t ? new Date(t * 1000).toLocaleTimeString("ko-KR", {hour12: false}) : "-");
+const secs = (d) => (d == null ? "" : d < 1 ? `${Math.round(d * 1000)}ms` : d < 120 ? `${d.toFixed(1)}s` : `${Math.round(d / 60)}분`);
+const num = (v, f = 0) => (v == null ? "-" : Number(v).toLocaleString("ko-KR", {maximumFractionDigits: f}));
+const par = (p) => (p ? `DP${p.dp}·TP${p.tp}·PP${p.pp}` : "-");
+const batch = (s) => (s && s.batch ? `${s.batch.microBatch}×${s.batch.gradientAccumulation}` : "-");
+const SOURCE = {profile: "측정 프로필", rule: "규칙", pinned: "고정값"};
+const EVENT = {launch: "시작", reconfigure: "재구성", rollback: "롤백", restore: "복구"};
+const ACTION = {ScaleDown: "GPU 축소", ScaleUp: "GPU 확대", Migrate: "이동", Reshard: "병렬 재분할",
+  ApplySettings: "설정 적용", Observe: "상태 확인"};
+const PHASES = ["Accepted", "Preparing", "Checkpoint", "Reconfigure"];
+const PHASE_KO = {Accepted: "접수", Preparing: "준비", Checkpoint: "Safe Point·저장", Reconfigure: "재시작",
+  Succeeded: "완료", Aborted: "중단"};
+let data = null;
+let selected = decodeURIComponent(location.hash.slice(1));
+
+function stateBadge(s) {
+  const cls = {Running: "run", Ready: "run", ReadyToRun: "run", Launching: "run", Reconfiguring: "warn", Succeeded: "ok",
+    Failed: "bad", LaunchFailed: "bad", Unschedulable: "warn", Aborted: "bad"}[s] || "";
+  return `<span class="badge ${cls}">${esc(s || "-")}</span>`;
+}
+
+function renderList() {
+  const ws = data.workloads || [];
+  if (!selected || !ws.some((w) => w.name === selected)) selected = ws[0]?.name || "";
+  $("list").innerHTML = ws.length ? ws.map((w) => `
+    <button aria-current="${w.name === selected}" data-n="${esc(w.name)}">
+      <div class="n">${esc(w.name)}</div>
+      <div class="s">${stateBadge(w.state)} ${esc(par(w.parallelism))} · 세대 ${esc(w.generation ?? "-")}
+        · step ${num(w.progress.step)}</div>
+    </button>`).join("") : `<div class="empty">실행 계획이 없습니다.</div>`;
+  for (const b of $("list").querySelectorAll("button")) {
+    b.onclick = () => { selected = b.dataset.n; location.hash = encodeURIComponent(selected); render(); };
+  }
+  const rq = data.requests || [];
+  $("pending").innerHTML = rq.length ? `<h2 style="margin-top:12px">대기 중인 요청</h2>` + rq.map((r) => `
+    <div class="s" style="margin-bottom:6px"><b>${esc(r.name)}</b> ${stateBadge(r.phase)}
+      ${esc(par(r.parallelism))}<br>${esc(r.reason || "")}</div>`).join("") : "";
+}
+
+function phaseTimes(a) {
+  const first = {}, last = {};
+  for (const c of a.conditions || []) {
+    const t = ts(c.time);
+    if (!(c.phase in first)) first[c.phase] = t;
+    last[c.phase] = t;
+  }
+  return {first, last};
+}
+
+function pipeline(a) {
+  const {first} = phaseTimes(a);
+  const end = first.Succeeded ?? first.Aborted;
+  const order = [...PHASES.filter((p) => p in first || !end), a.phase === "Aborted" ? "Aborted" : "Succeeded"];
+  return `<div class="pipe">` + order.map((p, i) => {
+    const t = first[p];
+    const next = order.slice(i + 1).map((q) => first[q]).find((x) => x != null);
+    const cls = p === "Aborted" && t != null ? "fail" : t == null ? "" : p === a.phase && !end ? "now" : "done";
+    const d = t != null && next != null && !["Succeeded", "Aborted"].includes(p) ? `<small>${secs(next - t)}</small>` : "";
+    return `<span class="ph ${cls}">${PHASE_KO[p] || p}${d}</span>`;
+  }).join("") + `</div>`;
+}
+
+function layout(x) {
+  return x ? `${par(x)} / GPU ${x.gpuCount ?? "-"}` : "-";
+}
+
+function actionCard(a) {
+  const b = a.before || {}, af = a.after || {};
+  const rows = [];
+  if (a.action !== "Observe" && (a.before || a.after)) rows.push(["구성", `${esc(layout(a.before))} → ${esc(layout(a.after))}`]);
+  if (a.action !== "Observe" && af.resumedStep != null) rows.push(["학습 위치", `step ${num(b.step)} 에서 저장 → step ${num(af.resumedStep)} 부터 재개`]);
+  if (a.target?.settings) rows.push(["요청 설정", `<span class="mono">${esc(JSON.stringify(a.target.settings))}</span>`]);
+  if (a.previous) rows.push(["이전 상태", esc({Kept: "유지됨(변경 없음)", Restored: "원래대로 복구됨", Lost: "복구 실패"}[a.previous] || a.previous)]);
+  if (a.result) rows.push(["결과", esc(a.result)]);
+  if (a.reason) rows.push(["사유", esc(a.reason)]);
+  if (a.message) rows.push(["메시지", esc(a.message)]);
+  const o = a.observation;
+  if (o) {
+    rows.push(["관측 시점 step", num(o.step)]);
+    if (o.plannedSettings) rows.push(["계획된 설정", `${esc(batch(o.plannedSettings))} (${esc(SOURCE[o.plannedSettings.source] || o.plannedSettings.source)}${o.plannedSettings.profileId ? ", " + esc(o.plannedSettings.profileId) : ""})`]);
+    if (o.appliedSettings) rows.push(["실제 적용", `${esc(o.appliedSettings.microBatch)}×${esc(o.appliedSettings.gradientAccumulation)}`]);
+    if (o.settingsMatch != null) rows.push(["일치", o.settingsMatch ? "예" : "아니오"]);
+  }
+  const cond = (a.conditions || []).map((c) => `<tr><td>${clock(ts(c.time))}</td><td>${esc(PHASE_KO[c.phase] || c.phase)}</td>
+    <td>${esc(c.result)}</td><td>${esc(c.reason || c.message)}</td></tr>`).join("");
+  return `<div class="action">
+    <div class="top"><b>${esc(ACTION[a.action] || a.action)}</b><span class="mono">${esc(a.name)}</span>
+      ${stateBadge(a.phase)}<span class="s" style="color:var(--muted)">${clock(ts(a.created))}</span></div>
+    ${a.action === "Observe" ? "" : pipeline(a)}
+    <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    ${cond ? `<details><summary>단계 기록 ${(a.conditions || []).length}건</summary>
+      <table><tr><th>시각</th><th>단계</th><th>결과</th><th>내용</th></tr>${cond}</table></details>` : ""}
+  </div>`;
+}
+
+function flow(w) {
+  const hist = w.history || [];
+  if (!hist.length) return `<div class="empty">아직 실행 이력이 없습니다.</div>`;
+  const actions = Object.fromEntries((w.actions || []).map((a) => [a.name, a]));
+  return `<div class="flow">` + hist.map((h, i) => {
+    const a = actions[h.action];
+    const arrow = i ? `<div class="arrow">→<br>${esc(a ? ACTION[a.action] || a.action : EVENT[h.event] || h.event)}</div>` : "";
+    const s = h.settings;
+    return `${arrow}<div class="gen ${h.generation === w.generation ? "cur" : ""}">
+      <div class="t">세대 ${esc(h.generation)} · ${esc(EVENT[h.event] || h.event)} · ${clock(ts(h.time))}</div>
+      <div class="h">${esc(par(h.parallelism))}</div>
+      <div class="t">${esc((h.nodes || []).join(", "))}${h.gpuIds ? ` · GPU ${h.gpuIds.length}` : ""}</div>
+      ${s ? `<div class="t">배치 ${esc(batch(s))} · ${esc(SOURCE[s.source] || s.source)}</div>` : ""}
+    </div>`;
+  }).join("") + `</div>`;
+}
+
+function chart(w) {
+  const pts = (w.samples || []).filter((p) => p[1] != null);
+  if (pts.length < 2) return `<div class="empty">진행 기록을 모으는 중입니다. 뷰어가 켜진 뒤부터 2초 간격으로 쌓입니다.</div>`;
+  const W = 760, H = 190, L = 54, R = 10, T = 10, B = 26;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const s0 = Math.min(...pts.map((p) => p[1])), s1 = Math.max(...pts.map((p) => p[1]));
+  const x = (t) => L + ((t - t0) / Math.max(1, t1 - t0)) * (W - L - R);
+  const y = (s) => T + (1 - (s - s0) / Math.max(1, s1 - s0)) * (H - T - B);
+  const bands = (w.actions || []).filter((a) => a.action !== "Observe").map((a) => {
+    const {first} = phaseTimes(a);
+    const a0 = first.Checkpoint ?? first.Preparing, a1 = first.Succeeded ?? first.Aborted ?? t1;
+    if (a0 == null || a1 < t0 || a0 > t1) return "";
+    const xa = x(Math.max(a0, t0)), xb = x(Math.min(a1, t1));
+    const col = a.phase === "Aborted" ? "var(--bad)" : "var(--warn)";
+    return `<rect x="${xa}" y="${T}" width="${Math.max(2, xb - xa)}" height="${H - T - B}" fill="${col}" opacity=".18"/>
+      <text x="${xa + 3}" y="${T + 12}">${esc(ACTION[a.action] || a.action)}</text>`;
+  }).join("");
+  const line = pts.map((p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
+  const ticks = [0, 0.5, 1].map((f) => {
+    const t = t0 + f * (t1 - t0);
+    return `<text x="${x(t)}" y="${H - 8}" text-anchor="${f === 0 ? "start" : f === 1 ? "end" : "middle"}">${clock(t)}</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="학습 step 추이">
+    ${bands}
+    <line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" stroke="var(--line)"/>
+    <text x="${L - 6}" y="${y(s1) + 4}" text-anchor="end">${num(s1)}</text>
+    <text x="${L - 6}" y="${y(s0) + 4}" text-anchor="end">${num(s0)}</text>
+    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${ticks}
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>학습 step</span>
+    <span><i style="background:var(--warn);opacity:.4"></i>재구성 중(저장→재시작)</span>
+    <span><i style="background:var(--bad);opacity:.4"></i>중단·롤백</span></div>`;
+}
+
+function gpus(w) {
+  const pool = data.pool;
+  const mine = Object.fromEntries((w.ranks || []).filter((r) => r.uuid).map((r) => [r.uuid, r]));
+  if (!pool || !(pool.devices || []).length) {
+    if (!(w.ranks || []).length) return `<div class="empty">GPU 배치 정보가 없습니다.</div>`;
+    return `<table><tr><th>rank</th><th>노드</th><th>장치</th><th>DP·TP·PP 좌표</th></tr>` + w.ranks.map((r) =>
+      `<tr><td>${r.rank}</td><td>${esc(r.node)}</td><td class="mono">${esc(r.uuid || r.gpu)}</td><td>${r.dp}·${r.tp}·${r.pp}</td></tr>`).join("") + `</table>`;
+  }
+  const nodes = {};
+  for (const d of pool.devices) ((nodes[d.node] ??= {})[d.parent] ??= []).push(d);
+  return `<div class="nodes">` + Object.entries(nodes).map(([n, ps]) => `<div class="node"><div class="h">${esc(n)}</div>` +
+    Object.values(ps).map((ds) => `<div class="phys"><div class="m">${esc(ds[0].model || "GPU")}</div><div class="slots">` +
+      ds.map((d) => {
+        const r = mine[d.uuid];
+        const cls = r ? "mine" : d.workload || d.holder ? "other" : "";
+        const who = r ? `<span class="r">rank ${r.rank}</span>` : d.workload || d.holder ? esc(d.workload || d.holder) : "비어 있음";
+        return `<div class="slot ${cls}" title="${esc(d.uuid)}">${who}<br>${esc(d.migProfile || "전체")}</div>`;
+      }).join("") + `</div></div>`).join("") + `</div>`).join("") + `</div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>이 작업</span><span><i style="background:var(--other)"></i>다른 작업</span>
+      <span><i></i>비어 있음</span><span>자원 풀 ${esc(pool.name)} · 관측 ${clock(ts(pool.observedAt))}</span></div>`;
+}
+
+function settingsPanel(w) {
+  const s = w.settings;
+  if (!s) return `<div class="empty">실행 설정을 쓰지 않는 작업입니다(launch.settings 없음).</div>`;
+  const applied = w.progress.appliedSettings;
+  const ok = applied && s.batch && applied.microBatch === s.batch.microBatch && applied.gradientAccumulation === s.batch.gradientAccumulation;
+  const rows = [
+    ["선택 방식", esc(SOURCE[s.source] || s.source)],
+    ["배치", `micro ${esc(s.batch?.microBatch)} × 누적 ${esc(s.batch?.gradientAccumulation)} × DP ${esc(w.parallelism?.dp)} = ${num(s.effectiveBatch)}`],
+  ];
+  if (s.profileId) rows.push(["프로필", `<span class="mono">${esc(s.profileId)}</span> · 측정 처리량 ${num(s.throughput)} samples/s`]);
+  if (s.evaluated != null) rows.push(["후보", `프로필 ${s.evaluated}개 중 하드웨어·구성 일치 ${s.matched ?? 0}개, 사용 가능 ${s.feasible ?? 0}개`]);
+  if (s.status === "needsProfiling") rows.push(["상태", `<span class="badge warn">측정 필요</span> 이 구성의 프로필이 없어 규칙으로 정함`]);
+  if (s.reason) rows.push(["근거", esc(s.reason)]);
+  if (s.origin) rows.push(["출처", `<span class="mono">${esc(s.origin)}</span>`]);
+  rows.push(["학습 코드 적용", applied ? `${esc(applied.microBatch)}×${esc(applied.gradientAccumulation)} ${ok ? '<span class="badge ok">일치</span>' : '<span class="badge warn">불일치</span>'}` : "보고 전"]);
+  return `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
+
+function renderDetail() {
+  const w = (data.workloads || []).find((x) => x.name === selected);
+  if (!w) { $("detail").innerHTML = `<div class="panel empty">왼쪽에서 작업을 고르세요.</div>`; return; }
+  const p = w.progress, eb = w.settings?.effectiveBatch || p.globalBatch;
+  const acts = (w.actions || []).slice().reverse();
+  $("detail").innerHTML = `
+    <div class="panel">
+      <h2>${esc(w.name)} <small>${esc(w.runtime)} · 요청 ${esc(w.request || "-")}</small></h2>
+      <div class="stats">
+        <div class="stat"><div class="k">상태</div><div class="v">${stateBadge(w.state)}</div><div class="d">GPU 연결 ${esc(w.binding || "-")}</div></div>
+        <div class="stat"><div class="k">병렬 구성</div><div class="v">${esc(par(w.parallelism))}</div><div class="d">${esc((w.nodes || []).join(", "))}</div></div>
+        <div class="stat"><div class="k">세대</div><div class="v">${esc(w.generation ?? "-")}</div><div class="d">재구성할 때마다 1 증가</div></div>
+        <div class="stat"><div class="k">학습 step</div><div class="v">${num(p.step)}</div><div class="d">${p.resumedStep != null ? `step ${num(p.resumedStep)} 부터 재개` : "처음부터"}</div></div>
+        <div class="stat"><div class="k">처리량</div><div class="v">${num(p.stepsPerSec, 1)} step/s</div><div class="d">${p.stepsPerSec != null && eb ? `≈ ${num(p.stepsPerSec * eb)} samples/s` : ""}</div></div>
+        <div class="stat"><div class="k">배치</div><div class="v">${esc(batch(w.settings))}</div><div class="d">${esc(SOURCE[w.settings?.source] || "-")}</div></div>
+      </div>
+      ${w.message ? `<div class="err" style="margin:10px 0 0">${esc(w.message)}</div>` : ""}
+    </div>
+    <div class="panel"><h2>실행 흐름 <small>세대별 구성과 설정</small></h2>${flow(w)}</div>
+    <div class="panel"><h2>학습 진행 <small>재구성 동안 멈췄다가 checkpoint에서 이어지는 모습</small></h2>${chart(w)}</div>
+    <div class="panel"><h2>런타임 작업 <small>RuntimeAction ${acts.length}건, 최신순</small></h2>
+      ${acts.length ? acts.map(actionCard).join("") : `<div class="empty">아직 요청된 작업이 없습니다.</div>`}</div>
+    <div class="panel"><h2>실행 설정 선택 <small>엔진이 고른 배치와 근거</small></h2>${settingsPanel(w)}</div>
+    <div class="panel"><h2>GPU 배치 <small>rank → 장치</small></h2>${gpus(w)}</div>`;
+}
+
+function render() {
+  if (!data) return;
+  $("meta").innerHTML = `namespace ${esc(data.namespace)} · ${clock(data.time)} 갱신` +
+    (data.error ? ` <span class="badge bad">조회 실패: ${esc(data.error)}</span>` : "");
+  renderList();
+  renderDetail();
+}
+
+async function poll() {
+  try {
+    const r = await fetch("api/state", {cache: "no-store"});
+    data = await r.json();
+    const open = [...document.querySelectorAll("details[open]")].length;
+    if (!open) render(); else $("meta").textContent = `namespace ${data.namespace} · ${clock(data.time)} 갱신 (기록을 펼친 동안 화면 고정)`;
+  } catch (e) {
+    $("meta").textContent = `서버 연결 실패: ${e}`;
+  }
+  setTimeout(poll, 2000);
+}
+poll();
+</script>
+</body>
+</html>

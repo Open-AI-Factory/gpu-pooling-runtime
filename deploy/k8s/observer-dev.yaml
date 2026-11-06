@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: grp-pool-observer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: grp-pool-observer-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices, resourceclaims]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [list]
+  - apiGroups: [gpu.platform.io]
+    resources: [gpuresourcepools/status]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: grp-pool-observer-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-pool-observer, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: grp-pool-observer-__NAMESPACE__}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: grp-pool-observer, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime, app: grp-pool-observer}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: grp-pool-observer}}
+  template:
+    metadata: {labels: {app: grp-pool-observer, app.kubernetes.io/part-of: grp-runtime}}
+    spec:
+      serviceAccountName: grp-pool-observer
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: observer
+          image: __REGISTRY__grp-runtime-operator:__TAG__
+          imagePullPolicy: IfNotPresent
+          command: [python, /work/deploy/pool/gpu_pool_observer.py, --pool, gpu-pool]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}

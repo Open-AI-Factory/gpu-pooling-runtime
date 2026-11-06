@@ -1,0 +1,12 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: RuntimeAction
+metadata: {name: ra-img-ddp4-to-dp2}
+spec:
+  executionPlanRef: img-ddp4-plan
+  action: ScaleDown
+  target:
+    gpus: 2
+    parallelism: {dp: 2, tp: 1, pp: 1}
+    allocation:
+      gpuIds: [MIG-00000000-0000-4000-8000-000000000003, MIG-00000000-0000-4000-8000-000000000004]
+  safePolicy: {mode: WaitSafePoint, timeoutSeconds: 120}

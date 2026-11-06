@@ -1,0 +1,17 @@
+apiVersion: grp.keti.re.kr/v1alpha1
+kind: PlanRequest
+metadata: {name: train3d-plan}
+spec:
+  requestId: req-train3d-0001
+  source: file
+  workloadRef: train3d
+  runtime: deepspeed
+  parallelism: {dp: 2, tp: 2, pp: 2}
+  profiling:
+    workloadType: training
+    weightsGb: 0.0196
+    gradientsGb: 0.0196
+    optimizerGb: 0.0391
+    activationGbPerSample: 0.000035
+    globalBatch: 1024
+  poolSnapshot: mock/two-node-nvlink-snapshot.yaml

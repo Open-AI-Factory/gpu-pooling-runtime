@@ -1,0 +1,17 @@
+snapshotVersion: two-node-v1
+nodes:
+  - name: gpu-node-a
+    interconnect: NVLink
+    gpus:
+      - {index: 0, memoryGb: 48}
+      - {index: 1, memoryGb: 48}
+      - {index: 2, memoryGb: 48}
+      - {index: 3, memoryGb: 48}
+  - name: gpu-node-b
+    interconnect: NVLink
+    gpus:
+      - {index: 0, memoryGb: 48}
+      - {index: 1, memoryGb: 48}
+      - {index: 2, memoryGb: 48}
+      - {index: 3, memoryGb: 48}
+workloads: []

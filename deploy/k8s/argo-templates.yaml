@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: grp-workflow, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: grp-workflow, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+rules:
+  - apiGroups: [grp.keti.re.kr]
+    resources: [planrequests, runtimeactions]
+    verbs: [create, get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [workflowtaskresults]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: grp-workflow, namespace: __NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+subjects: [{kind: ServiceAccount, name: grp-workflow, namespace: __NAMESPACE__}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: grp-workflow}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: grp-train
+  namespace: __NAMESPACE__
+  labels: {app.kubernetes.io/part-of: grp-runtime}
+  annotations:
+    workflows.argoproj.io/title: GRP 학습 시작
+    workflows.argoproj.io/description: >-
+      PlanRequest를 만들어 GRP 런타임 엔진에 학습을 맡기고 끝날 때까지 기다린다.
+      실행 중 재구성은 grp-runtime-action으로 요청하고, 진행은 런타임 화면(grp-viewer)에서 본다.
+      실행계획 이름은 이 워크플로 이름과 같다.
+spec:
+  entrypoint: train
+  serviceAccountName: grp-workflow
+  arguments:
+    parameters:
+      - {name: model, value: ddp, enum: [ddp, 3d], description: "ddp = train_ddp(DP만, 실행 설정 사용), 3d = train_3d(DP·TP·PP)"}
+      - {name: dp, value: "4", enum: ["1", "2", "3", "4", "8"]}
+      - {name: tp, value: "1", enum: ["1", "2", "4"]}
+      - {name: pp, value: "1", enum: ["1", "2", "4"]}
+      - {name: gpu-ids, value: "", description: "쉼표로 구분한 GPU·MIG UUID. 비우면 자원 풀의 빈 GPU에서 고른다"}
+      - {name: max-steps, value: "3000"}
+      - {name: effective-batch, value: "1024"}
+      - {name: max-micro-batch, value: "256", description: "ddp만 사용"}
+      - {name: profile-configmap, value: "", description: "측정 프로필 ConfigMap(예: train-ddp-profiles). 비우면 규칙으로 정한다. ddp만 사용"}
+  templates:
+    - name: train
+      steps:
+        - - name: render
+            template: render
+        - - name: run
+            template: run
+            arguments:
+              parameters:
+                - {name: manifest, value: "{{steps.render.outputs.result}}"}
+
+    - name: render
+      container:
+        image: __REGISTRY__grp-runtime-operator:__TAG__
+        imagePullPolicy: IfNotPresent
+        command: [python, -m, grp_runtime.submit, plan]
+        args: [--name, "{{workflow.name}}", --request-id, "{{workflow.uid}}", --model, "{{workflow.parameters.model}}",
+               --image, "__REGISTRY__grp-runtime-train:__TRAIN_TAG__",
+               --dp, "{{workflow.parameters.dp}}", --tp, "{{workflow.parameters.tp}}", --pp, "{{workflow.parameters.pp}}",
+               --gpu-ids, "{{workflow.parameters.gpu-ids}}", --max-steps, "{{workflow.parameters.max-steps}}",
+               --effective-batch, "{{workflow.parameters.effective-batch}}",
+               --max-micro-batch, "{{workflow.parameters.max-micro-batch}}",
+               --profile-configmap, "{{workflow.parameters.profile-configmap}}"]
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 256Mi}
+
+    - name: run
+      inputs:
+        parameters:
+          - name: manifest
+      outputs:
+        parameters:
+          - {name: phase, valueFrom: {jsonPath: "{.status.phase}"}}
+          - {name: outcome, valueFrom: {jsonPath: "{.status.outcome}", default: ""}}
+      resource:
+        action: create
+        setOwnerReference: true
+        successCondition: status.phase == Succeeded
+        failureCondition: status.phase in (Failed,Rejected,LaunchFailed)
+        manifest: "{{inputs.parameters.manifest}}"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: grp-runtime-action
+  namespace: __NAMESPACE__
+  labels: {app.kubernetes.io/part-of: grp-runtime}
+  annotations:
+    workflows.argoproj.io/title: GRP 실행 중 작업
+    workflows.argoproj.io/description: >-
+      실행 중인 학습에 RuntimeAction을 보낸다. ScaleDown·ScaleUp·Reconfigure는 GPU와 병렬 구성을 바꾸고,
+      ApplySettings는 GPU를 그대로 두고 배치 설정만 바꾸고, Observe는 재시작 없이 상태만 확인한다.
+      바꾸는 작업은 Safe Point에서 checkpoint를 저장한 뒤 재시작하고, 실패하면 이전 상태로 되돌린다.
+spec:
+  entrypoint: act
+  serviceAccountName: grp-workflow
+  arguments:
+    parameters:
+      - {name: plan, value: "", description: "대상 실행계획 이름(grp-train 워크플로 이름)"}
+      - {name: action, value: Observe, enum: [Observe, ScaleDown, ScaleUp, Reconfigure, ApplySettings]}
+      - {name: dp, value: "2", enum: ["1", "2", "3", "4", "8"], description: "ScaleDown·ScaleUp·Reconfigure만 사용"}
+      - {name: tp, value: "1", enum: ["1", "2", "4"]}
+      - {name: pp, value: "1", enum: ["1", "2", "4"]}
+      - {name: gpu-ids, value: "", description: "바꾼 뒤 쓸 GPU·MIG UUID(쉼표 구분). 비우면 엔진이 현재 GPU에서 고른다"}
+      - {name: profile-configmap, value: "", description: "ApplySettings: 측정 프로필 ConfigMap"}
+      - {name: max-micro-batch, value: "0", description: "ApplySettings: micro batch 상한(0 = 그대로)"}
+      - {name: micro-batch, value: "0", description: "ApplySettings: 고정 micro batch(누적과 함께, 0 = 쓰지 않음)"}
+      - {name: gradient-accumulation, value: "0"}
+      - {name: safe-point-timeout, value: "120"}
+  templates:
+    - name: act
+      steps:
+        - - name: render
+            template: render
+        - - name: run
+            template: run
+            arguments:
+              parameters:
+                - {name: manifest, value: "{{steps.render.outputs.result}}"}
+
+    - name: render
+      container:
+        image: __REGISTRY__grp-runtime-operator:__TAG__
+        imagePullPolicy: IfNotPresent
+        command: [python, -m, grp_runtime.submit, action]
+        args: [--name, "{{workflow.name}}", --plan, "{{workflow.parameters.plan}}",
+               --action, "{{workflow.parameters.action}}",
+               --dp, "{{workflow.parameters.dp}}", --tp, "{{workflow.parameters.tp}}", --pp, "{{workflow.parameters.pp}}",
+               --gpu-ids, "{{workflow.parameters.gpu-ids}}",
+               --profile-configmap, "{{workflow.parameters.profile-configmap}}",
+               --max-micro-batch, "{{workflow.parameters.max-micro-batch}}",
+               --micro-batch, "{{workflow.parameters.micro-batch}}",
+               --gradient-accumulation, "{{workflow.parameters.gradient-accumulation}}",
+               --timeout, "{{workflow.parameters.safe-point-timeout}}"]
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 256Mi}
+
+    - name: run
+      inputs:
+        parameters:
+          - name: manifest
+      outputs:
+        parameters:
+          - {name: phase, valueFrom: {jsonPath: "{.status.phase}"}}
+          - {name: previous, valueFrom: {jsonPath: "{.status.previous}", default: ""}}
+          - {name: message, valueFrom: {jsonPath: "{.status.message}", default: ""}}
+          - {name: observation, valueFrom: {jsonPath: "{.status.observation}", default: ""}}
+      resource:
+        action: create
+        setOwnerReference: true
+        successCondition: status.phase == Succeeded
+        failureCondition: status.phase == Aborted
+        manifest: "{{inputs.parameters.manifest}}"

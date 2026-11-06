@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: grp-checkpoints-__NAMESPACE__, labels: {app.kubernetes.io/part-of: grp-runtime}}
+spec:
+  capacity: {storage: __CKPT_SIZE__}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: __STORAGE_CLASS__
+  claimRef: {namespace: __NAMESPACE__, name: grp-checkpoints}
+  hostPath: {path: __DEV_HOSTPATH__, type: Directory}

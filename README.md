@@ -6,10 +6,10 @@ It takes an execution request through **ExecutionPlan generation → placement �
 
 | Component | Code |
 |---|---|
-| Execution Plan Controller | `intake.py` (request validation → requirement analysis → DP/TP/PP decision → ExecutionPlan creation and registration), `planner.py`, `k8s/execution_plan.py` |
-| Runtime Action Controller | `controller.py` (state transitions), `operator.py` (kopf watch · sequential processing · duplicate suppression) |
-| Adapter Manager · Registry | `adapters/__init__.py` (capability declaration, adapter selection) |
-| Runtime Adapter | `adapters/` mock · local (single process) · torchrun (multi-process) · k8s (rank Pods) |
+| Execution Plan Controller | `execution_plan_controller/` — `intake.py` (request validation → requirement analysis → DP/TP/PP decision → ExecutionPlan creation and registration), `planner.py`, `placement.py`, `execution_plan.py` |
+| Runtime Action Controller | `runtime_coordination/runtime_action_controller/` — `controller.py` (state transitions), `operator.py` (kopf watch · sequential processing · duplicate suppression) |
+| Adapter Manager · Registry | `runtime_coordination/adapter_manager/registry.py` (capability declaration, adapter selection) |
+| Runtime Adapter | `runtime_adapter/` mock · local (single process) · torchrun (multi-process) · k8s (rank Pods, `workload.py`) |
 | Runtime Agent | `agent/hook.py` (hook added to training code), `agent/channel.py` (file · ConfigMap channel) |
 | Resource pool integration | `pool.py` (candidate · snapshot interface + mock) |
 | Service recovery | `recovery/` (partial reconfiguration based on a component dependency graph) |
@@ -94,6 +94,65 @@ check: memory per rank × ranks sharing the same physical GPU ≤ physical GPU m
 ```
 
 Among the combinations that fit in memory, the one with the smallest model split (TP×PP) is chosen. When a split is needed, TP is preferred on a single node with a fast interconnect (NVLink), and PP otherwise.
+
+## Execution settings
+
+`launch.settings` fixes the effective batch and lets the plan choose micro-batch and gradient accumulation for the selected parallelism. The result is passed to ranks in `AI_FACTORY_RUNTIME_CONFIG` (`runtime-plan-env-v1`) and recomputed on every reconfiguration.
+
+```yaml
+settings:
+  effectiveBatch: 1024
+  maxMicroBatch: 256
+  profileConfigMap: ddp-profiles
+  identity: {precision: float32}
+  allowSynthetic: false
+```
+
+- Profiles use the EP3 `runtime_plan` profile format. They come from `profiles` (inline list or bundle) or from `profiles.json` in the ConfigMap named by `profileConfigMap` (a list, or an EP3 bundle with `acceptedProfiles`).
+- A profile matches when the effective batch, DP/TP/PP, node count, GPUs per node, GPU model, mode and MIG profile all equal the allocated devices, and the optional `identity` fields (`model`, `precision`, `signature`) agree.
+- Among matching profiles, those with a changed effective batch, a micro-batch over `maxMicroBatch`, failed quality, a memory budget below the measured peak or above device memory, or synthetic evidence (unless `allowSynthetic`) are dropped. The one with the highest measured throughput is chosen (`source: profile`).
+- No matching profile: the rule is used (largest divisor of the per-rank batch up to `maxMicroBatch`, `source: rule`) and `profiles.status: needsProfiling` is recorded.
+- Matching profiles but none usable: the plan is rejected with `noFeasiblePlan`; during reconfiguration this rolls back to the previous configuration.
+- `settings.batch: {microBatch, gradientAccumulation}` pins the batch (`source: pinned`); it is used for measurement runs and is rejected when it does not give the effective batch for the selected DP.
+- Example: `scenarios/profiles/ddp-profiles-synthetic.yaml` with `scenarios/plan-request/pr-train-ddp4-profiles-k3s-mig.yaml` and `scenarios/runtime-action/ra-ddp4p-to-dp2-k3s-mig.yaml`.
+
+### Applying settings to a running workload
+
+Two RuntimeAction actions keep the parallelism and GPUs of the workload unchanged.
+
+- `Observe`: records the current state in `status.observation` (step, world size, readiness, planned settings with profile, applied settings, `settingsMatch`). Nothing is restarted; `target` must be empty.
+- `ApplySettings`: merges `target.settings` into the plan's `launch.settings` (for example a new `profileConfigMap` or `maxMicroBatch`) and selects settings again for the current layout before touching the workload.
+  - Not usable (`noFeasiblePlan`, invalid settings): `Aborted reason=SettingsRejected previous=Kept`, no restart.
+  - Same batch as now: `Aborted reason=InvalidAction`, no restart.
+  - Otherwise Safe Point, checkpoint, restart at the same layout with the new settings, and `settings=Applied` check. On failure the previous `launch.settings` and planning are restored (`previous=Restored`).
+
+```yaml
+spec:
+  executionPlanRef: ddp4s-plan
+  action: ApplySettings
+  target:
+    settings: {profileConfigMap: train-ddp-profiles}
+```
+
+Scenarios: `ra-ddp4s-observe.yaml`, `ra-ddp4s-apply-profiles.yaml`, `ra-ddp4s-apply-infeasible.yaml`, `ra-ddp4s-apply-fail-rollback.yaml` in `scenarios/runtime-action/`.
+
+These map the EP3 `runtime.aifactory.dev` RuntimeAction operations: `ApplyPlan` → `ApplySettings` (delivered by checkpoint restart and environment instead of a sidecar), `Observe` → `Observe`. The EP3 CRD and controller are not used or changed.
+
+### Measuring profiles
+
+`deploy/profiles/measure_profiles.py` runs one PlanRequest per `DPxMicroBatch` combination through the normal launch path with a pinned batch, reads the throughput and peak reserved memory that `train_ddp.py --measure-warmup` reports at the end, and writes an EP3-style bundle (`acceptedProfiles`, `excludedProfiles`, `evidenceManifest`) and optionally a ConfigMap.
+
+```bash
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml PYTHONPATH=src python deploy/profiles/measure_profiles.py \
+  --template scenarios/plan-request/pr-train-ddp4-settings-k3s-mig.yaml --gpus <uuid>,<uuid>,... \
+  --configs 4x64,4x128,2x128,1x256 --effective-batch 1024 --steps 200 --warmup 20 \
+  --model-id grp/train_ddp-mlp --out runs/profiles/train-ddp.json --configmap train-ddp-profiles
+```
+
+- Hardware (model, MIG profile, device memory) comes from the GpuResourcePool entries of the given devices; mixed hardware is refused.
+- Memory budget is the measured peak × `--headroom` (default 1.2), capped at device memory. Quality passes when the loss is finite and decreased.
+- Runs wait until the pool no longer lists the previous run's pods before starting the next one.
+- `scenarios/profiles/train-ddp-mig-measured.yaml` holds 11 profiles measured on RTX PRO 6000 MIG 1g.24gb (gloo, effective batch 1024).
 
 ## Kubernetes (multi-node Kind)
 
